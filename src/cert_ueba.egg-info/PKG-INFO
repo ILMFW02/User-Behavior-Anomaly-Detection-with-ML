@@ -1,0 +1,95 @@
+Metadata-Version: 2.4
+Name: cert-ueba
+Version: 0.1.0
+Summary: Offline UEBA modelling pipeline for CERT Insider Threat logs
+Requires-Python: >=3.11
+Description-Content-Type: text/markdown
+Requires-Dist: joblib
+Requires-Dist: numpy
+Requires-Dist: polars
+Requires-Dist: pyarrow
+Requires-Dist: scikit-learn
+Provides-Extra: dev
+Requires-Dist: pytest; extra == "dev"
+Requires-Dist: ruff; extra == "dev"
+
+# CERT UEBA: Offline ML Pipeline
+
+This project detects simulated insider-threat behaviour from the CMU CERT Insider Threat
+dataset. The first milestone is an offline, reproducible ML pipeline. Wazuh integration is
+intentionally outside this initial scope.
+
+## What the pipeline produces
+
+- `data/processed/user_day_features.parquet`: raw daily behavioural features per user.
+- `data/processed/user_day_model_features.parquet`: causal baseline-deviation features.
+- `models/peer_group_kmeans.joblib`: peer-group model built from the training period.
+- `models/isolation_forest.joblib`: anomaly-detection model.
+- `reports/scored_user_days.parquet`: risk-ranked user-days, with contributing features.
+
+`answers/` is never used to fit features, baselines, clusters, or anomaly models. It is only
+used by the evaluation command after scoring.
+
+## Environment (Windows PowerShell)
+
+```powershell
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install --upgrade pip
+python -m pip install -e ".[dev]"
+Copy-Item config.example.toml config.toml
+```
+
+The current project requires Python 3.11 or newer.
+
+## Obtaining and placing CERT data
+
+Download the CMU CERT Insider Threat dataset release selected for the research (for example,
+r4.2) from its official distribution source, accept any associated terms, and extract it
+locally. The source is not downloaded by this repository because it is large and may have
+distribution conditions.
+
+Set `paths.raw_dir` in `config.toml` to the extracted directory that contains files such as:
+
+```text
+logon.csv
+device.csv
+http.csv
+email.csv
+file.csv
+LDAP/              # optional, for organisation attributes
+answers/           # held out until evaluation
+```
+
+The first action after extraction is:
+
+```powershell
+ueba validate-data --config config.toml
+```
+
+This only inspects filenames and CSV headers; it does not load the full dataset.
+
+## Offline ML workflow
+
+```powershell
+ueba build-features --config config.toml
+ueba train --config config.toml --train-end 2010-06-30
+ueba score --config config.toml
+ueba evaluate --config config.toml
+```
+
+Use a time-based split. `--train-end` must precede the test period. Do not use a random
+row-level split: it leaks future behaviour into a user's baseline.
+
+## Modelling approach
+
+1. Aggregate CERT events to one `user, day` observation.
+2. Derive rolling personal baselines using only prior days. New users fall back to peer-group
+   statistics after model training.
+3. Cluster normal user profiles into peer groups with KMeans.
+4. Use Isolation Forest on raw and baseline-deviation features.
+5. Combine the model anomaly score and peer-group distance into an explainable risk score.
+
+The initial feature set is deliberately conservative. Features that require temporal joins
+(for example, proving that a particular file was copied to a mounted USB device) should be
+added only after validating the exact CSV schema of the downloaded CERT release.

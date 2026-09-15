@@ -1,0 +1,2 @@
+[console_scripts]
+ueba = ueba.cli:main

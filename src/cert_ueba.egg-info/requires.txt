@@ -1,0 +1,9 @@
+joblib
+numpy
+polars
+pyarrow
+scikit-learn
+
+[dev]
+pytest
+ruff
